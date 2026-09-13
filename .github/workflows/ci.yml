@@ -14,6 +14,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.9", "3.13"]
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,9 +23,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run tests
         run: python -m unittest discover -s tests -v
-        env:
-          PYTHONUTF8: "1"
-      - name: Run the doctor against this runner
-        run: python kr_doctor.py --json
-        env:
-          PYTHONUTF8: "1"
+      - name: Smoke test the CLI
+        # A bare runner has no Hermes install, so the doctor is expected to
+        # report findings and exit 1. The exit-code contract itself is covered
+        # by ExitCodeTests against fixture homes; this only proves the script
+        # starts and renders on this OS and Python.
+        run: python kr_doctor.py --version

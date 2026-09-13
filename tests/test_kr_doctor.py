@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -195,8 +197,24 @@ class RunAndRenderTests(unittest.TestCase):
         payload = json.dumps({"findings": [f.to_dict() for f in findings]}, ensure_ascii=False)
         self.assertEqual(len(json.loads(payload)["findings"]), len(kr_doctor.CHECKS))
 
-    def test_exit_code_is_zero_without_failures(self):
-        # A temporary HERMES_HOME with a locked-down config should produce no FAIL.
+class ExitCodeTests(unittest.TestCase):
+    """The exit code is the contract scripts depend on: 0 clean, 1 needs action."""
+
+    @staticmethod
+    def _run_main(home: Path, *argv: str) -> int:
+        previous = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = str(home)
+        buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buffer):
+                return kr_doctor.main(list(argv))
+        finally:
+            if previous is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = previous
+
+    def test_healthy_install_exits_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / ".hermes"
             home.mkdir()
@@ -207,18 +225,24 @@ class RunAndRenderTests(unittest.TestCase):
                 "TELEGRAM_BOT_TOKEN=placeholder\nTELEGRAM_ALLOWED_USERS=12345\n",
                 encoding="utf-8",
             )
-            previous = os.environ.get("HERMES_HOME")
-            os.environ["HERMES_HOME"] = str(home)
-            try:
-                env = kr_doctor.gather()
-                findings = kr_doctor.run_checks(env)
-            finally:
-                if previous is None:
-                    os.environ.pop("HERMES_HOME", None)
-                else:
-                    os.environ["HERMES_HOME"] = previous
-        failures = [f.id for f in findings if f.status == kr_doctor.FAIL]
-        self.assertEqual(failures, [], f"unexpected failures: {failures}")
+            for key in ("TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS"):
+                os.environ.pop(key, None)
+            self.assertEqual(self._run_main(home, "--json"), 0)
+
+    def test_missing_home_exits_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run_main(Path(tmp) / "absent", "--json"), 1)
+
+    def test_unlocked_bot_exits_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / ".hermes"
+            home.mkdir()
+            (home / "config.yaml").write_text(
+                "platforms:\n  telegram:\n    enabled: true\n", encoding="utf-8"
+            )
+            (home / ".env").write_text("TELEGRAM_BOT_TOKEN=placeholder\n", encoding="utf-8")
+            os.environ.pop("TELEGRAM_ALLOWED_USERS", None)
+            self.assertEqual(self._run_main(home, "--json"), 1)
 
 
 if __name__ == "__main__":
