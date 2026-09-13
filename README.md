@@ -91,14 +91,20 @@ hermes plugins enable hermes-kr-doctor
 토큰 노출 검사도 같은 원칙입니다. "설정이 안전한가"를 묻지 않고, 설정·로그 파일 안에
 토큰 모양 문자열이 실제로 들어 있는지 봅니다.
 
-## 어디서 나왔나
+## 판정 근거는 공개돼 있습니다
 
-점검 항목 9가지는 제가 쓴 [Hermes 설치 매뉴얼](https://autofrog.kr/lab)의 부록 A(트러블슈팅)와
-부록 B(보안 수칙)를 코드로 옮긴 것입니다. 윈도우 PC에 직접 깔면서 실제로 막혔던 것들이라
-없는 문제를 상상해서 만든 항목은 하나도 없습니다.
+진단 결과마다 옆에 문서 주소가 붙습니다. 제 말을 믿으라는 게 아니라 가서 확인하시라는 뜻입니다.
 
-매뉴얼은 사람이 읽고 스스로 고치는 것이고, 이 도구는 같은 내용을 기계가 확인해 주는 것입니다.
-그래서 진단 결과마다 매뉴얼 절 번호가 붙습니다. 더 알고 싶으면 그 쪽을 펴면 됩니다.
+- 제어된 폴더 액세스가 기본으로 지키는 폴더 목록과 앱 허용 방법은
+  [Microsoft Defender 문서](https://learn.microsoft.com/defender-endpoint/controlled-folder-access-overview)에 있습니다.
+  참고로 바탕화면은 그 목록에 없습니다. 그래서 이 도구도 바탕화면은 검사하지 않습니다.
+- Message Content가 왜 승인이 필요한 권한인지는
+  [디스코드 개발자 문서](https://docs.discord.com/developers/events/gateway)에 있습니다.
+- 코드페이지 949를 UTF-8로 바꾸는 설정은
+  [Microsoft 문서](https://learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page)에 있습니다.
+
+허용 사용자 환경변수 이름(`TELEGRAM_ALLOWED_USERS`, `GATEWAY_ALLOW_ALL_USERS`)과 플랫폼별
+토큰 키는 Hermes 본체 소스의 게이트웨이 설정에서 그대로 가져왔습니다. 추측한 이름이 없습니다.
 
 ## 의존성
 
@@ -139,13 +145,14 @@ bot stopped answering. `kr_doctor.py` also runs as a plain script with zero thir
 imports, because the moment you need a diagnosis is the moment `pip install` is not an option.
 
 Two of the checks reproduce the symptom instead of reading a setting. Controlled Folder
-Access is detected by writing a probe file into `~/Documents` and catching `PermissionError`,
-since the registry value alone never says whether the interpreter actually running Hermes is
-on the allow list. Token exposure is detected by scanning config and log files for
-credential-shaped strings, not by asking whether the configuration looks safe.
+Access is detected by writing a probe file into the folders Microsoft documents as protected
+by default and catching `PermissionError`, since the registry value alone never says whether
+the interpreter actually running Hermes is on the allow list, and the allow list itself is
+unreadable without administrator rights. Token exposure is detected by scanning config and
+log files for credential-shaped strings, not by asking whether the configuration looks safe.
 
-Every check comes from a failure I hit while writing a 61-page Korean install manual for
-Hermes, published free at [autofrog.kr/lab](https://autofrog.kr/lab). Each finding cites the
-manual section that covers it.
+Every finding cites the vendor page that documents the setting it found, so you can check the
+call rather than take it on faith. The allowlist and token environment variable names come
+from the Hermes gateway source, not from guesswork.
 
 MIT licensed. Issues and new checks welcome, especially failures you've seen on Korean-locale Windows.

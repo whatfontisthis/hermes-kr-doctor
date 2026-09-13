@@ -8,8 +8,8 @@ so it can run BEFORE Hermes is working, which is exactly when it is needed.
     python kr_doctor.py --fix      # 자동으로 고칠 수 있는 것만 조치
     python kr_doctor.py --json     # 기계 판독용
 
-The checks are transcriptions of the failure modes catalogued in
-"AUTOFROG PRESS FIELD MANUAL 002 — Hermes 에이전트 설치 매뉴얼" (부록 A, 부록 B).
+Each check carries a `docs` link to the vendor page that explains the setting
+it found, so a finding is something the reader can go verify.
 """
 
 from __future__ import annotations
@@ -69,6 +69,13 @@ SECRET_PATTERNS = [
 ]
 
 
+# Vendor pages a finding can point at. Checked by hand; if one 404s, that is a bug.
+HERMES_INSTALL = "hermes-agent.nousresearch.com"
+DISCORD_INTENTS = "docs.discord.com/developers/events/gateway"
+MS_CFA_OVERVIEW = "learn.microsoft.com/defender-endpoint/controlled-folder-access-overview"
+MS_CFA_CONFIGURE = "learn.microsoft.com/defender-endpoint/controlled-folder-access-configure"
+MS_UTF8 = "learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page"
+
 _HANGUL_START, _HANGUL_END = 0xAC00, 0xD7A3
 
 
@@ -96,7 +103,7 @@ class Finding:
     detail: str
     fix: str = ""
     command: str = ""
-    manual: str = ""
+    docs: str = ""
     auto_fixed: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -107,7 +114,7 @@ class Finding:
             "detail": self.detail,
             "fix": self.fix,
             "command": self.command,
-            "manual": self.manual,
+            "docs": self.docs,
             "auto_fixed": self.auto_fixed,
         }
 
@@ -293,7 +300,7 @@ def check_hermes_home(env: Env) -> Finding:
             status=FAIL,
             detail=f"{env.home} 폴더가 없습니다. Hermes가 아직 한 번도 실행되지 않았습니다.",
             fix="Hermes 앱을 한 번 실행하거나 터미널에서 hermes를 실행해 초기 설정을 만드세요.",
-            manual="1-2절",
+            docs=HERMES_INSTALL,
         )
     if env.config_error:
         return Finding(
@@ -302,7 +309,7 @@ def check_hermes_home(env: Env) -> Finding:
             status=FAIL,
             detail=f"config.yaml을 읽지 못했습니다: {env.config_error}",
             fix="config.yaml의 들여쓰기가 깨졌을 가능성이 큽니다. 백업 후 hermes setup을 다시 실행하세요.",
-            manual="부록 A",
+            docs=HERMES_INSTALL,
         )
     if not env.config_path.exists():
         return Finding(
@@ -311,7 +318,7 @@ def check_hermes_home(env: Env) -> Finding:
             status=WARN,
             detail=f"{env.home} 폴더는 있지만 config.yaml이 없습니다.",
             fix="설정이 아직 저장되지 않았습니다. 앱에서 두뇌(AI 공급자) 연결까지 마치세요.",
-            manual="1-3절",
+            docs=HERMES_INSTALL,
         )
     return Finding(
         id="hermes_home",
@@ -345,7 +352,7 @@ def check_hermes_cli(env: Env) -> Finding:
             detail="데스크톱 앱은 설치돼 있지만 터미널에서 hermes 명령을 쓸 수 없습니다.",
             fix="게이트웨이 설정·상태 확인은 터미널 명령이 필요합니다. 앱 설정에서 CLI 설치를 켜거나 아래 명령으로 설치하세요.",
             command="curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
-            manual="1-2절",
+            docs=HERMES_INSTALL,
         )
     return Finding(
         id="hermes_cli",
@@ -354,23 +361,34 @@ def check_hermes_cli(env: Env) -> Finding:
         detail="hermes 명령을 찾을 수 없습니다. PATH에 없거나 설치되지 않았습니다.",
         fix="데스크톱 앱을 설치했다면 앱을 한 번 실행해 주세요. 터미널로 설치하려면 아래 명령을 쓰세요.",
         command="curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
-        manual="1-2절",
+        docs=HERMES_INSTALL,
     )
 
 
 def _protected_folder_candidates() -> List[Path]:
-    home = Path.home()
-    names = ["Documents", "Desktop", "Pictures", "문서", "바탕 화면"]
-    return [home / n for n in names if (home / n).is_dir()]
+    """Folders Controlled Folder Access guards by default.
+
+    Taken from Microsoft's published list, which is Documents, Favorites, Music,
+    Pictures and Videos. Desktop is NOT on it, so probing there proves nothing.
+    OneDrive Known Folder Move relocates these, and CFA follows them, so the
+    OneDrive copies are probed too.
+    """
+    names = ["Documents", "Favorites", "Music", "Pictures", "Videos"]
+    roots = [Path.home()]
+    try:
+        roots += [p for p in Path.home().glob("OneDrive*") if p.is_dir()]
+    except OSError:
+        pass
+    return [root / n for root in roots for n in names if (root / n).is_dir()]
 
 
 def check_controlled_folder_access(env: Env) -> Finding:
-    """The manual's "파일 작업만 조용히 실패한다" symptom (부록 A).
+    """Windows Controlled Folder Access blocking the interpreter.
 
-    Windows Controlled Folder Access blocks python.exe writing to Documents and
-    friends, and Hermes surfaces it as a silent no-op. We reproduce the symptom
-    instead of inferring it from settings, because the registry value alone does
-    not say whether THIS interpreter is on the allow list.
+    Hermes surfaces the block as a silent no-op, so we reproduce the symptom
+    instead of inferring it from settings: the registry value alone does not say
+    whether THIS interpreter is on the allow list, and the allow list itself is
+    unreadable without administrator rights.
     """
     if not env.is_windows:
         return Finding(
@@ -411,7 +429,7 @@ def check_controlled_folder_access(env: Env) -> Finding:
             fix="Windows 보안 → 바이러스 및 위협 방지 → 랜섬웨어 방지 → 보호 기록에서 차단된 기록을 모두 "
             "'디바이스에서 허용'으로 바꾸세요. 차단 기록이 여러 건이면 전부 허용해야 합니다.",
             command=f'Add-MpPreference -ControlledFolderAccessAllowedApplication "{sys.executable}"',
-            manual="1-7절 · 부록 A",
+            docs=MS_CFA_CONFIGURE,
         )
     if enabled:
         return Finding(
@@ -421,7 +439,7 @@ def check_controlled_folder_access(env: Env) -> Finding:
             detail="기능이 켜져 있지만 지금 이 파이썬은 막히지 않았습니다. "
             "Hermes가 다른 파이썬으로 돌고 있다면 그쪽은 막힐 수 있습니다.",
             fix="Hermes 파일 작업이 조용히 실패하면 보호 기록을 먼저 확인하세요.",
-            manual="1-7절",
+            docs=MS_CFA_OVERVIEW,
         )
     return Finding(
         id="controlled_folder_access",
@@ -432,7 +450,7 @@ def check_controlled_folder_access(env: Env) -> Finding:
 
 
 def check_gateway(env: Env) -> Finding:
-    """부록 A: "게이트웨이가 죽어 있다"."""
+    """A dead gateway: the bot is configured but nothing answers."""
     exe = hermes_executable()
     if exe:
         code, out = _run([exe, "gateway", "status"], timeout=45)
@@ -452,7 +470,7 @@ def check_gateway(env: Env) -> Finding:
                 detail="hermes gateway status가 정상 응답하지 않았습니다. 메신저로 말을 걸어도 답이 없습니다.",
                 fix="게이트웨이를 다시 설정하거나 PC를 재부팅하세요. 자동 시작이 등록돼 있으면 스스로 올라옵니다.",
                 command="hermes gateway setup",
-                manual="3-6절 · 부록 A",
+                docs=HERMES_INSTALL,
             )
 
     if env.is_windows:
@@ -467,7 +485,7 @@ def check_gateway(env: Env) -> Finding:
             detail="hermes 관련 프로세스는 떠 있지만 상태를 확인할 수 없었습니다(hermes 명령 없음).",
             fix="정확한 확인은 터미널 명령이 필요합니다.",
             command="hermes gateway status",
-            manual="부록 A",
+            docs=HERMES_INSTALL,
         )
     return Finding(
         id="gateway",
@@ -475,7 +493,7 @@ def check_gateway(env: Env) -> Finding:
         status=SKIP,
         detail="hermes 명령이 없어 확인하지 못했습니다.",
         fix="hermes 명령을 설치한 뒤 다시 진단하세요.",
-        manual="부록 A",
+        docs=HERMES_INSTALL,
     )
 
 
@@ -488,7 +506,7 @@ def check_platform_tokens(env: Env) -> Finding:
             status=WARN,
             detail="텔레그램·디스코드 등 메신저가 하나도 연결돼 있지 않습니다.",
             fix="폰에서 비서를 부르려면 메신저를 하나 연결하세요. 텔레그램이 가장 간단합니다.",
-            manual="2부 · 3부",
+            docs=HERMES_INSTALL,
         )
     missing = [p for p in platforms if not env.lookup(PLATFORM_TOKEN_ENV.get(p, ""))]
     labels = ", ".join(PLATFORM_LABEL.get(p, p) for p in platforms)
@@ -500,7 +518,7 @@ def check_platform_tokens(env: Env) -> Finding:
             status=FAIL,
             detail=f"{names}{particle(names)} 켜져 있지만 봇 토큰이 없습니다.",
             fix="토큰을 재발급해 등록하세요. 텔레그램은 BotFather에서 /revoke, 디스코드는 개발자 포털 → 봇 → 토큰 초기화입니다.",
-            manual="2-5절 · 3-4절 · 부록 A",
+            docs=HERMES_INSTALL,
         )
     return Finding(
         id="platform_tokens",
@@ -511,7 +529,7 @@ def check_platform_tokens(env: Env) -> Finding:
 
 
 def check_allowed_users(env: Env) -> Finding:
-    """부록 B: 허용 사용자를 비워 두면 봇이 사실상 전체 공개됩니다."""
+    """An empty allowlist leaves the bot open to anyone who finds it."""
     platforms = env.enabled_platforms()
     if not platforms:
         return Finding(
@@ -528,7 +546,7 @@ def check_allowed_users(env: Env) -> Finding:
             detail="GATEWAY_ALLOW_ALL_USERS가 켜져 있습니다. 누구나 이 봇에게 명령할 수 있습니다.",
             fix=f"{env.dotenv_path} 에서 GATEWAY_ALLOW_ALL_USERS=false 로 바꾸고, "
             "플랫폼별 허용 사용자 목록에 본인 ID만 넣으세요.",
-            manual="부록 B",
+            docs=HERMES_INSTALL,
         )
     wide_open: List[str] = []
     for name in platforms:
@@ -548,7 +566,7 @@ def check_allowed_users(env: Env) -> Finding:
             fix=f"{env.dotenv_path} 에 아래 줄을 넣고 게이트웨이를 재시작하세요. "
             "텔레그램 숫자 ID는 @userinfobot에게 아무 말이나 걸면 알려 줍니다.",
             command=hint,
-            manual="2-4절 · 부록 B",
+            docs=HERMES_INSTALL,
         )
     return Finding(
         id="allowed_users",
@@ -571,7 +589,7 @@ def _log_files(env: Env) -> List[Path]:
 
 
 def check_discord_intent(env: Env) -> Finding:
-    """부록 A: "봇이 온라인인데 대답이 없다" — 대개 Message Content Intent가 꺼져 있습니다."""
+    """Bot online but silent, usually a missing Message Content intent."""
     if "discord" not in env.enabled_platforms():
         return Finding(
             id="discord_intent",
@@ -593,7 +611,7 @@ def check_discord_intent(env: Env) -> Finding:
                 "봇은 온라인이지만 사람 말이 내용 없이 도착하고 있습니다.",
                 fix="디스코드 개발자 포털 → 내 앱 → Bot → Privileged Gateway Intents에서 "
                 "MESSAGE CONTENT INTENT와 SERVER MEMBERS INTENT를 켜고 게이트웨이를 재시작하세요.",
-                manual="3-3절 · 부록 A",
+                docs=DISCORD_INTENTS,
             )
     return Finding(
         id="discord_intent",
@@ -602,7 +620,7 @@ def check_discord_intent(env: Env) -> Finding:
         detail="로그에서 문제 흔적은 찾지 못했습니다. 이 설정은 디스코드 쪽에만 있어 PC에서 확인할 수 없습니다.",
         fix="봇이 온라인인데 대답이 없다면 개발자 포털 → Bot → Privileged Gateway Intents에서 "
         "MESSAGE CONTENT INTENT가 켜져 있는지 먼저 보세요. 서버 채널에서는 @봇이름 멘션이 필요합니다.",
-        manual="3-3절 · 부록 A",
+        docs=DISCORD_INTENTS,
     )
 
 
@@ -622,8 +640,8 @@ def check_korean_path(env: Env) -> Finding:
             code, out = _powershell("(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage').ACP")
         if code == 0 and re.search(r"\b949\b", out):
             problems.append("콘솔 코드페이지가 949(euc-kr)입니다. 로그와 오류 메시지가 깨져 보입니다.")
-            fixes.append("설정 → 시간 및 언어 → 언어 및 지역 → 관리자 언어 설정에서 "
-                         "'세계 언어 지원을 위해 Unicode UTF-8 사용'을 켜세요.")
+            fixes.append("설정 → 시간 및 언어 → 언어 및 지역 → 관리자 언어 설정 → 시스템 로캘 변경에서 "
+                         "'베타: 세계 언어 지원을 위해 Unicode UTF-8 사용'을 켜고 재부팅하세요.")
 
     enc = (sys.getfilesystemencoding() or "").lower()
     if enc not in ("utf-8", "utf8", ""):
@@ -643,7 +661,7 @@ def check_korean_path(env: Env) -> Finding:
         status=WARN,
         detail=" / ".join(problems),
         fix=" ".join(fixes),
-        manual="부록 A",
+        docs=MS_UTF8,
     )
 
 
@@ -726,7 +744,7 @@ def _tighten_permissions(path: Path) -> str:
 
 
 def check_token_exposure(env: Env) -> Finding:
-    """부록 B, 토큰 3계명을 파일 시스템에서 실제로 검사합니다."""
+    """Look for credential-shaped strings where they should never be."""
     leaks: List[str] = []
     for path in _iter_scan_targets(env):
         try:
@@ -750,7 +768,7 @@ def check_token_exposure(env: Env) -> Finding:
             fix="망설이지 말고 지금 재발급하세요. 재발급하는 순간 이전 토큰은 무효가 됩니다. "
             "텔레그램은 BotFather에서 /revoke, 디스코드는 개발자 포털 → 봇 → 토큰 초기화입니다. "
             "토큰은 .env에만 두고, 로그·문서·채팅창에는 절대 남기지 마세요.",
-            manual="부록 B",
+            docs=HERMES_INSTALL,
         )
     if shared_with:
         user = os.environ.get("USERNAME") or os.environ.get("USER") or "내계정"
@@ -766,7 +784,7 @@ def check_token_exposure(env: Env) -> Finding:
             detail=f"{dotenv} 파일을 {shared_with}도 읽을 수 있습니다. 이 파일 안에 봇 토큰이 들어 있습니다.",
             fix="파일 권한을 본인만 읽도록 좁히세요. --fix 옵션을 붙이면 자동으로 조치합니다.",
             command=command,
-            manual="부록 B",
+            docs=HERMES_INSTALL,
         )
     if not dotenv.exists():
         return Finding(
@@ -873,7 +891,7 @@ def render(findings: List[Finding], home: Path) -> str:
         mark = _MARK[finding.status]
         if color:
             mark = f"{_COLOR[finding.status]}{mark}{_RESET}"
-        suffix = f"  ({finding.manual})" if finding.manual else ""
+        suffix = f"  ({finding.docs})" if finding.docs else ""
         lines.append(f"  {mark} {finding.title}{suffix}")
         lines.append(_wrap(finding.detail))
         if finding.auto_fixed:
