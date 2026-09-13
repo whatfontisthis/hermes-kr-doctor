@@ -1,0 +1,14 @@
+name: hermes-kr-doctor
+version: 0.1.0
+description: "한국어 Hermes 설치 진단기 — Korean-language setup doctor for Hermes. Reproduces the Windows and Korean-locale install failures instead of guessing at them."
+author: "Woobin Lee (autofrog)"
+kind: standalone
+homepage: https://github.com/whatfontisthis/hermes-kr-doctor
+license: MIT
+
+capabilities:
+  provides_tools:
+    - kr_doctor
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []
